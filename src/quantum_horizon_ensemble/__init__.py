@@ -8,8 +8,8 @@ from .diagnostics import (
 )
 from .hmc import (
     DiagonalMetric,
-    HMCDiagnostic,
     HMCConfig,
+    HMCDiagnostic,
     HMCResult,
     hmc_transition,
     leapfrog,
@@ -27,10 +27,10 @@ __version__ = "0.1.0"
 
 __all__ = [
     "DiagonalMetric",
+    "EnsembleConfig",
     "HMCConfig",
     "HMCDiagnostic",
     "HMCResult",
-    "EnsembleConfig",
     "RelaxedHorizonEnsemble",
     "area_matched_initial_position",
     "effective_sample_size",
