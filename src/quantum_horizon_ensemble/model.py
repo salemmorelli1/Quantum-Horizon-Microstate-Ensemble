@@ -59,7 +59,7 @@ class EnsembleConfig:
             )
 
     @classmethod
-    def from_mapping(cls, values: dict[str, Any]) -> "EnsembleConfig":
+    def from_mapping(cls, values: dict[str, Any]) -> EnsembleConfig:
         config = cls(**values)
         config.validate()
         return config

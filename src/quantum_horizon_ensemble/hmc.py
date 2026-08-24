@@ -49,7 +49,7 @@ class HMCConfig:
             raise ValueError("Invalid mass bounds")
 
     @classmethod
-    def from_mapping(cls, values: dict[str, Any]) -> "HMCConfig":
+    def from_mapping(cls, values: dict[str, Any]) -> HMCConfig:
         config = cls(**values)
         config.validate()
         return config
