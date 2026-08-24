@@ -1,0 +1,32 @@
+{
+  "ensemble": {
+    "n_punctures": 64,
+    "area_target": 512.0,
+    "gamma_bi": 0.274,
+    "planck_length_sq": 1.0,
+    "kappa_area": 0.05,
+    "kappa_quant": 3.0,
+    "eta_degeneracy": 0.5
+  },
+  "hmc": {
+    "num_samples": 80,
+    "warmup_steps": 80,
+    "step_size": 0.004,
+    "min_leapfrog_steps": 5,
+    "max_leapfrog_steps": 12,
+    "step_jitter": 0.1,
+    "target_accept": 0.85,
+    "adapt_step_size": true,
+    "adapt_diagonal_mass": true,
+    "mass_update_interval": 25,
+    "mass_ridge": 0.001,
+    "minimum_mass": 0.001,
+    "maximum_mass": 1000.0,
+    "divergence_threshold": 1000.0
+  },
+  "runtime": {
+    "seed": 20260823,
+    "initial_noise_scale": 0.02,
+    "device": "cpu"
+  }
+}

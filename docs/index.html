@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Interactive laboratory for differentiable LQG-inspired quantum-horizon microstate ensembles and PyTorch HMC.">
+  <meta name="theme-color" content="#070710">
+  <title>Quantum Horizon Microstate Ensemble</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070710;
+      --surface: rgba(18, 18, 34, .82);
+      --surface-2: rgba(28, 27, 51, .82);
+      --line: rgba(255, 255, 255, .12);
+      --text: #f6f3ff;
+      --muted: #aaa7bd;
+      --gold: #f6bd58;
+      --violet: #9c7cff;
+      --cyan: #62d9ff;
+      --rose: #ff6f91;
+      --green: #75e6a4;
+      --shadow: 0 26px 80px rgba(0, 0, 0, .36);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% -10%, rgba(156, 124, 255, .18), transparent 34rem),
+        radial-gradient(circle at 88% 18%, rgba(98, 217, 255, .10), transparent 32rem),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    button, input { font: inherit; }
+    a { color: inherit; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin-inline: auto; }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 7, 16, .76);
+      backdrop-filter: blur(20px);
+    }
+    .header-inner {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      text-decoration: none;
+      font-weight: 760;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      position: relative;
+      background: #020204;
+      box-shadow: 0 0 0 2px rgba(246, 189, 88, .75), 0 0 26px rgba(246, 189, 88, .32);
+    }
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      inset: -5px 4px;
+      border: 1px solid rgba(98, 217, 255, .6);
+      border-radius: 50%;
+      transform: rotate(-24deg);
+    }
+    .header-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      text-decoration: none;
+      color: var(--muted);
+      transition: .2s ease;
+    }
+    .header-link:hover { color: var(--text); border-color: rgba(246, 189, 88, .5); }
+
+    .hero {
+      padding: 72px 0 34px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(340px, .9fr);
+      gap: 42px;
+      align-items: center;
+    }
+    .eyebrow {
+      margin: 0 0 14px;
+      color: var(--gold);
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .2em;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(3rem, 7vw, 6.4rem);
+      line-height: .92;
+      letter-spacing: -.065em;
+      max-width: 820px;
+    }
+    .gradient-text {
+      color: transparent;
+      background: linear-gradient(100deg, var(--gold), #ffe1a2 38%, var(--violet) 72%, var(--cyan));
+      background-clip: text;
+      -webkit-background-clip: text;
+    }
+    .hero-copy {
+      max-width: 690px;
+      margin: 26px 0 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.5vw, 1.17rem);
+    }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .button {
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 11px 17px;
+      color: #0b0910;
+      background: var(--gold);
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform .2s ease, box-shadow .2s ease;
+    }
+    .button:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(246, 189, 88, .22); }
+    .button.secondary { color: var(--text); background: transparent; border-color: var(--line); }
+
+    .hero-card, .panel, .metric, .method-card {
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(29, 28, 51, .82), rgba(12, 12, 24, .82));
+      box-shadow: var(--shadow);
+    }
+    .hero-card { border-radius: 32px; padding: 22px; overflow: hidden; }
+    .hero-card canvas { width: 100%; aspect-ratio: 1.2; display: block; border-radius: 22px; background: #05050c; }
+    .hero-card figcaption { color: var(--muted); font-size: .82rem; margin-top: 12px; }
+
+    .tabbar {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 18px 0 20px;
+      scrollbar-width: none;
+    }
+    .tabbar::-webkit-scrollbar { display: none; }
+    .tab {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .03);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 9px 14px;
+      cursor: pointer;
+    }
+    .tab[aria-selected="true"] { color: #09070c; background: var(--gold); border-color: var(--gold); font-weight: 800; }
+    .tab:focus-visible, .button:focus-visible, input:focus-visible { outline: 3px solid rgba(98, 217, 255, .7); outline-offset: 2px; }
+
+    main { padding-bottom: 72px; }
+    .tab-panel { display: none; animation: reveal .35s ease; }
+    .tab-panel.active { display: block; }
+    @keyframes reveal { from { opacity: 0; transform: translateY(8px); } }
+
+    .section-heading { margin: 20px 0 22px; }
+    .section-heading h2 { margin: 0; font-size: clamp(2rem, 4vw, 3.6rem); letter-spacing: -.045em; }
+    .section-heading p { color: var(--muted); max-width: 760px; }
+
+    .equation {
+      overflow-x: auto;
+      border: 1px solid rgba(156, 124, 255, .25);
+      border-radius: 18px;
+      background: rgba(156, 124, 255, .07);
+      color: #e9e1ff;
+      padding: 18px;
+      font: 600 clamp(.86rem, 2vw, 1.08rem)/1.65 "Cambria Math", Georgia, serif;
+      white-space: nowrap;
+    }
+    .overview-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .method-card { padding: 20px; border-radius: var(--radius); }
+    .method-card .number { color: var(--gold); font: 800 .8rem/1 monospace; letter-spacing: .1em; }
+    .method-card h3 { margin: 10px 0 7px; font-size: 1.08rem; }
+    .method-card p { color: var(--muted); margin: 0; font-size: .93rem; }
+
+    .lab-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(290px, .7fr); gap: 18px; }
+    .panel { border-radius: var(--radius); overflow: hidden; }
+    .canvas-wrap { position: relative; min-height: 570px; background: #030308; }
+    #horizonCanvas { width: 100%; height: 570px; display: block; touch-action: none; cursor: grab; }
+    #horizonCanvas.dragging { cursor: grabbing; }
+    .canvas-badge {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      padding: 8px 11px;
+      color: var(--muted);
+      background: rgba(5, 5, 12, .72);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      font-size: .75rem;
+      backdrop-filter: blur(10px);
+    }
+    .controls { padding: 20px; }
+    .controls h3 { margin: 0 0 18px; }
+    .control { margin-bottom: 20px; }
+    .control-row { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: .85rem; }
+    .control output { color: var(--text); font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: var(--gold); }
+    .control-note { color: var(--muted); font-size: .78rem; margin: 16px 0 0; }
+    .control-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .control-actions .button { padding: 9px 13px; font-size: .82rem; }
+
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+    .metric { border-radius: 17px; padding: 15px; }
+    .metric span { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .09em; }
+    .metric strong { display: block; margin-top: 7px; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+
+    .comb-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .7fr); gap: 18px; }
+    #combCanvas { width: 100%; height: 460px; display: block; background: #05050c; }
+    .readout { padding: 22px; }
+    .readout-list { display: grid; gap: 12px; }
+    .readout-item { border-top: 1px solid var(--line); padding-top: 12px; }
+    .readout-item span { color: var(--muted); font-size: .8rem; }
+    .readout-item strong { display: block; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: stretch;
+      gap: 12px;
+    }
+    .node { position: relative; min-height: 160px; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+    .node:not(:last-child)::after { content: "→"; position: absolute; right: -19px; top: 50%; color: var(--gold); font-size: 1.5rem; z-index: 2; }
+    .node small { color: var(--gold); text-transform: uppercase; letter-spacing: .1em; }
+    .node h3 { margin: 10px 0 6px; font-size: 1rem; }
+    .node p { color: var(--muted); margin: 0; font-size: .84rem; }
+    .callout { margin-top: 18px; border-left: 3px solid var(--rose); padding: 14px 16px; background: rgba(255, 111, 145, .08); color: #f2dfe5; }
+
+    .pipeline { display: grid; gap: 10px; counter-reset: part -1; }
+    .pipeline article { display: grid; grid-template-columns: 70px 1fr auto; align-items: center; gap: 16px; padding: 17px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+    .part { color: var(--gold); font-family: ui-monospace, monospace; font-weight: 800; }
+    .pipeline h3 { margin: 0 0 4px; font-size: 1rem; }
+    .pipeline p { margin: 0; color: var(--muted); font-size: .86rem; }
+    .status { color: var(--green); font: 800 .72rem/1 monospace; }
+
+    footer { border-top: 1px solid var(--line); padding: 30px 0 44px; color: var(--muted); font-size: .85rem; }
+    footer .shell { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+
+    @media (max-width: 900px) {
+      .hero, .lab-grid, .comb-grid { grid-template-columns: 1fr; }
+      .hero { padding-top: 46px; }
+      .overview-grid { grid-template-columns: 1fr 1fr; }
+      .architecture { grid-template-columns: 1fr; }
+      .node:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -24px; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .shell { width: min(100% - 20px, 1180px); }
+      .header-link span { display: none; }
+      .hero { gap: 26px; }
+      .hero-card { padding: 12px; }
+      .overview-grid { grid-template-columns: 1fr; }
+      .canvas-wrap, #horizonCanvas { min-height: 470px; height: 470px; }
+      .metrics { grid-template-columns: 1fr; }
+      .pipeline article { grid-template-columns: 55px 1fr; }
+      .pipeline .status { grid-column: 2; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="#top" aria-label="Quantum Horizon home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Quantum Horizon</span>
+      </a>
+      <a class="header-link" href="https://github.com/salemmorelli1/Quantum-Horizon-Microstate-Ensemble" target="_blank" rel="noreferrer">
+        <span>View repository</span><b aria-hidden="true">↗</b>
+      </a>
+    </div>
+  </header>
+
+  <div class="shell" id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="eyebrow">Problem 2 · Differentiable quantum geometry</p>
+        <h1 id="hero-title">Sample the <span class="gradient-text">quantum horizon.</span></h1>
+        <p class="hero-copy">A PyTorch research environment for continuous relaxations of LQG puncture ensembles, exact autograd fields, and high-dimensional Hamiltonian Monte Carlo.</p>
+        <div class="hero-actions">
+          <button class="button" type="button" data-open-tab="lab">Open horizon lab</button>
+          <a class="button secondary" href="research_blueprint.md">Read the mathematics</a>
+        </div>
+      </div>
+      <figure class="hero-card">
+        <canvas id="heroCanvas" width="640" height="520" aria-label="Animated quantum horizon with punctures"></canvas>
+        <figcaption>Half-integer wells organize the relaxed proxy-spin field around a quantized horizon.</figcaption>
+      </figure>
+    </section>
+
+    <nav class="tabbar" role="tablist" aria-label="Research sections">
+      <button class="tab" role="tab" aria-selected="true" aria-controls="overview" id="tab-overview" data-tab="overview">Overview</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="lab" id="tab-lab" data-tab="lab" tabindex="-1">Horizon lab</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="comb" id="tab-comb" data-tab="comb" tabindex="-1">Comb potential</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="geometry" id="tab-geometry" data-tab="geometry" tabindex="-1">Statistical geometry</button>
+      <button class="tab" role="tab" aria-selected="false" aria-controls="pipeline" id="tab-pipeline" data-tab="pipeline" tabindex="-1">Research pipeline</button>
+    </nav>
+  </div>
+
+  <main class="shell">
+    <section class="tab-panel active" id="overview" role="tabpanel" aria-labelledby="tab-overview">
+      <div class="section-heading">
+        <p class="eyebrow">The relaxed experiment</p>
+        <h2>Discrete physics. Continuous trajectories.</h2>
+        <p>The model is exact for its stated continuous target and explicit about where exact quantum-state recovery must begin.</p>
+      </div>
+      <div class="equation" aria-label="Potential energy equation">U(z) = ½κ<sub>A</sub>[Ã(x) − A<sub>★</sub>]<sup>2</sup> + κ<sub>Q</sub>Σ sin<sup>2</sup>(2πx<sub>i</sub>) − ηΣ log(2x<sub>i</sub>+1) − Σ log σ(z<sub>i</sub>)</div>
+      <div class="overview-grid" style="margin-top:16px">
+        <article class="method-card"><span class="number">01 / MAP</span><h3>Bounded proxy spins</h3><p>Softplus maps every latent coordinate to x<sub>i</sub> &gt; ½ while preserving smooth gradients.</p></article>
+        <article class="method-card"><span class="number">02 / AREA</span><h3>Differentiable spectrum</h3><p>The LQG area eigenvalue is evaluated continuously over all punctures in linear time.</p></article>
+        <article class="method-card"><span class="number">03 / COMB</span><h3>Half-integer attraction</h3><p>A periodic potential vanishes on the quantum lattice and has finite inter-well barriers.</p></article>
+        <article class="method-card"><span class="number">04 / MEASURE</span><h3>Proper latent density</h3><p>The transformation Jacobian prevents the unphysical flat tail omitted by a naïve relaxation.</p></article>
+        <article class="method-card"><span class="number">05 / HMC</span><h3>Exact MH correction</h3><p>Autograd leapfrog proposals are accepted or rejected using the full Hamiltonian error.</p></article>
+        <article class="method-card"><span class="number">06 / BOUNDARY</span><h3>No premature entropy claim</h3><p>Exact state counting still requires normalizers and invariant-intertwiner correction.</p></article>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+      <div class="section-heading"><p class="eyebrow">Interactive horizon laboratory</p><h2>Drag the horizon through its puncture field.</h2><p>Move the black hole, change the visible puncture count, and tighten the comb. This browser visualization is an explanatory emulator; the research sampler is the PyTorch implementation.</p></div>
+      <div class="lab-grid">
+        <div class="panel canvas-wrap">
+          <canvas id="horizonCanvas" width="900" height="570" aria-label="Draggable black hole surrounded by quantum punctures"></canvas>
+          <span class="canvas-badge">Drag the horizon · punctures follow the area surface</span>
+        </div>
+        <aside class="panel controls" aria-label="Horizon controls">
+          <h3>Ensemble controls</h3>
+          <label class="control"><span class="control-row"><span>Visible punctures N</span><output id="nOut">32</output></span><input id="nSlider" type="range" min="8" max="80" step="1" value="32"></label>
+          <label class="control"><span class="control-row"><span>Comb strength κ<sub>Q</sub></span><output id="kOut">4.0</output></span><input id="kSlider" type="range" min="0.2" max="14" step="0.2" value="4"></label>
+          <label class="control"><span class="control-row"><span>Barbero–Immirzi γ</span><output id="gOut">0.274</output></span><input id="gSlider" type="range" min="0.1" max="0.5" step="0.001" value="0.274"></label>
+          <label class="control"><span class="control-row"><span>Area target A<sub>★</sub></span><output id="aOut">256</output></span><input id="aSlider" type="range" min="100" max="900" step="4" value="256"></label>
+          <div class="control-actions"><button class="button" type="button" id="pulseButton">Pause HMC pulse</button><button class="button secondary" type="button" id="resetButton">Reset position</button></div>
+          <p class="control-note">The visible punctures are a reduced display. Production runs can scale beyond 1,000 coordinates without drawing every node.</p>
+        </aside>
+      </div>
+      <div class="metrics" aria-live="polite">
+        <div class="metric"><span>Relaxed area</span><strong id="areaMetric">—</strong></div>
+        <div class="metric"><span>Lattice RMS</span><strong id="latticeMetric">—</strong></div>
+        <div class="metric"><span>Log degeneracy proxy</span><strong id="degMetric">—</strong></div>
+        <div class="metric"><span>Area residual</span><strong id="residualMetric">—</strong></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="comb" role="tabpanel" aria-labelledby="tab-comb" hidden>
+      <div class="section-heading"><p class="eyebrow">Potential explorer</p><h2>Inspect the quantum comb.</h2><p>The wells lie at half-integers; their local curvature is 8π²κ<sub>Q</sub>, while adjacent wells are separated by a barrier of height κ<sub>Q</sub>.</p></div>
+      <div class="comb-grid">
+        <div class="panel"><canvas id="combCanvas" width="840" height="460" aria-label="Graph of periodic comb potential"></canvas></div>
+        <aside class="panel readout">
+          <label class="control"><span class="control-row"><span>Proxy spin x</span><output id="xOut">1.20</output></span><input id="xSlider" type="range" min="0.5" max="4" step="0.005" value="1.2"></label>
+          <label class="control"><span class="control-row"><span>Comb strength κ<sub>Q</sub></span><output id="combKOut">4.0</output></span><input id="combKSlider" type="range" min="0.2" max="14" step="0.2" value="4"></label>
+          <div class="readout-list">
+            <div class="readout-item"><span>V<sub>quant</sub>(x)</span><strong id="vReadout">—</strong></div>
+            <div class="readout-item"><span>dV/dx</span><strong id="gradReadout">—</strong></div>
+            <div class="readout-item"><span>Nearest half-integer</span><strong id="nearestReadout">—</strong></div>
+            <div class="readout-item"><span>Local lattice displacement</span><strong id="distanceReadout">—</strong></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="geometry" role="tabpanel" aria-labelledby="tab-geometry" hidden>
+      <div class="section-heading"><p class="eyebrow">Statistical geometry</p><h2>A diagonal field plus one collective direction.</h2><p>The macroscopic area residual creates a rank-one all-to-all coupling. This makes scalable structured metrics possible.</p></div>
+      <div class="architecture" aria-label="Computational architecture">
+        <article class="node"><small>Latent</small><h3>z ∈ ℝ<sup>N</sup></h3><p>Unconstrained coordinates sampled by HMC.</p></article>
+        <article class="node"><small>Transform</small><h3>x = ½ + Softplus(z)</h3><p>Smooth physical lower bound and Jacobian.</p></article>
+        <article class="node"><small>Potential</small><h3>Area + comb + proxy</h3><p>One global residual and coordinatewise wells.</p></article>
+        <article class="node"><small>Gradient</small><h3>torch.autograd.grad</h3><p>Exact reverse-mode field in O(N).</p></article>
+        <article class="node"><small>Sampler</small><h3>HMC / NUTS</h3><p>Warmup adaptation, MH correction, diagnostics.</p></article>
+      </div>
+      <div class="equation" style="margin-top:18px">∇<sup>2</sup><sub>x</sub>F = κ<sub>A</sub>C<sup>2</sup>vv<sup>T</sup> + diag(d<sub>1</sub>, …, d<sub>N</sub>)</div>
+      <div class="callout"><strong>Preconditioning strategy.</strong> Use a diagonal mass for local comb curvature plus one low-rank correction aligned with the latent area gradient. A dense N×N metric is unnecessary and becomes prohibitive beyond 1,000 punctures.</div>
+    </section>
+
+    <section class="tab-panel" id="pipeline" role="tabpanel" aria-labelledby="tab-pipeline" hidden>
+      <div class="section-heading"><p class="eyebrow">Auditable execution</p><h2>Problem 2 follows the proven pipeline.</h2><p>Every stage produces a versioned, machine-readable artifact and stops immediately on failure.</p></div>
+      <div class="pipeline">
+        <article><span class="part">PART 0</span><div><h3>Validate the model</h3><p>Check the area domain, proper latent tail, and analytic/autograd gradient agreement.</p></div><span class="status">GATED</span></article>
+        <article><span class="part">PART 1</span><div><h3>Sample the relaxed ensemble</h3><p>Run warmup-only adaptation followed by a fixed Metropolis-corrected HMC kernel.</p></div><span class="status">GATED</span></article>
+        <article><span class="part">PART 2</span><div><h3>Measure quantization</h3><p>Report area error, lattice RMS, comb statistic, ESS, and symmetric spin occupancies.</p></div><span class="status">GATED</span></article>
+        <article><span class="part">PART 3</span><div><h3>Analyze geometry and entropy boundary</h3><p>Evaluate scalable curvature proxies and identify the missing normalizer and exact correction.</p></div><span class="status">GATED</span></article>
+        <article><span class="part">PART 4</span><div><h3>Validate the repository</h3><p>Test the measure, gradients, artifacts, leapfrog reversibility, and finite-chain output.</p></div><span class="status">GATED</span></article>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="shell"><span>Quantum Horizon Microstate Ensemble · Research software v0.1.0</span><span>Continuous proposal ≠ exact quantum count</span></div></footer>
+
+  <script>
+    "use strict";
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const tabs = [...document.querySelectorAll("[role=tab]")];
+    const panels = [...document.querySelectorAll("[role=tabpanel]")];
+
+    function activateTab(name) {
+      tabs.forEach(tab => {
+        const active = tab.dataset.tab === name;
+        tab.setAttribute("aria-selected", String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+      panels.forEach(panel => {
+        const active = panel.id === name;
+        panel.hidden = !active;
+        panel.classList.toggle("active", active);
+      });
+      if (name === "lab") resizeHorizon();
+      if (name === "comb") drawComb();
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => activateTab(tab.dataset.tab));
+      tab.addEventListener("keydown", event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const direction = event.key === 'ArrowRight' ? 1 : -1;
+        const next = tabs[(index + direction + tabs.length) % tabs.length];
+        activateTab(next.dataset.tab);
+        next.focus();
+      });
+    });
+    document.querySelectorAll("[data-open-tab]").forEach(button => button.addEventListener("click", () => {
+      activateTab(button.dataset.openTab);
+      document.querySelector(".tabbar").scrollIntoView({behavior: reducedMotion ? "auto" : "smooth"});
+    }));
+
+    function fitCanvas(canvas, cssWidth, cssHeight) {
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(cssWidth * ratio);
+      canvas.height = Math.round(cssHeight * ratio);
+      const context = canvas.getContext("2d");
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      return context;
+    }
+
+    const stars = Array.from({length: 120}, (_, i) => ({
+      x: ((i * 73) % 127) / 127,
+      y: ((i * 47 + 17) % 131) / 131,
+      a: .18 + ((i * 19) % 60) / 100,
+      r: .4 + ((i * 13) % 18) / 10
+    }));
+
+    function drawStars(ctx, width, height) {
+      ctx.save();
+      for (const star of stars) {
+        ctx.fillStyle = `rgba(220,226,255,${star.a})`;
+        ctx.beginPath();
+        ctx.arc(star.x * width, star.y * height, star.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawBlackHole(ctx, cx, cy, radius, phase, punctures = 30, proxies = null) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-.18);
+      const ring = ctx.createRadialGradient(0, 0, radius * .75, 0, 0, radius * 1.45);
+      ring.addColorStop(0, "rgba(0,0,0,0)");
+      ring.addColorStop(.48, "rgba(156,124,255,.1)");
+      ring.addColorStop(.62, "rgba(246,189,88,.9)");
+      ring.addColorStop(.7, "rgba(98,217,255,.38)");
+      ring.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = ring;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, radius * 1.55, radius * .68, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const glow = ctx.createRadialGradient(cx, cy, radius * .55, cx, cy, radius * 1.5);
+      glow.addColorStop(0, "#010102");
+      glow.addColorStop(.57, "#010102");
+      glow.addColorStop(.74, "rgba(22,10,42,.76)");
+      glow.addColorStop(1, "rgba(156,124,255,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * .82, 0, Math.PI * 2);
+      ctx.fill();
+
+      const orbit = radius * 1.28;
+      for (let i = 0; i < punctures; i++) {
+        const angle = (i / punctures) * Math.PI * 2 + phase * (i % 3 === 0 ? .4 : -.16);
+        const spin = proxies ? proxies[i] : .5 + ((i * 7) % 6) / 2;
+        const wobble = Math.sin(i * 2.7 + phase) * radius * .025;
+        const x = cx + Math.cos(angle) * (orbit + wobble);
+        const y = cy + Math.sin(angle) * (orbit + wobble) * .84;
+        const color = i % 3 === 0 ? "#f6bd58" : i % 3 === 1 ? "#9c7cff" : "#62d9ff";
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = color;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, y, 2.1 + Math.min(spin, 4) * .7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    const heroCanvas = document.getElementById("heroCanvas");
+    let heroPhase = 0;
+    function heroFrame() {
+      const rect = heroCanvas.getBoundingClientRect();
+      const ctx = fitCanvas(heroCanvas, rect.width, rect.height);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      drawStars(ctx, rect.width, rect.height);
+      drawBlackHole(ctx, rect.width * .5, rect.height * .5, Math.min(rect.width, rect.height) * .23, heroPhase, 38);
+      heroPhase += reducedMotion ? 0 : .006;
+      requestAnimationFrame(heroFrame);
+    }
+    requestAnimationFrame(heroFrame);
+
+    const lab = {
+      n: 32, kappa: 4, gamma: .274, target: 256,
+      cx: 0, cy: 0, phase: 0, running: true, dragging: false, proxies: []
+    };
+    const horizonCanvas = document.getElementById("horizonCanvas");
+    const nSlider = document.getElementById("nSlider");
+    const kSlider = document.getElementById("kSlider");
+    const gSlider = document.getElementById("gSlider");
+    const aSlider = document.getElementById("aSlider");
+
+    function rebuildProxies() {
+      lab.proxies = Array.from({length: lab.n}, (_, i) => {
+        const well = .5 + ((i * 5 + 1) % 7) / 2;
+        return well + Math.sin(i * 8.31 + lab.phase) * (.22 / Math.sqrt(lab.kappa));
+      });
+    }
+    rebuildProxies();
+
+    function resizeHorizon() {
+      const rect = horizonCanvas.getBoundingClientRect();
+      if (!lab.cx && !lab.cy) { lab.cx = rect.width * .5; lab.cy = rect.height * .5; }
+    }
+
+    function updateMetrics() {
+      const C = 8 * Math.PI * lab.gamma;
+      const area = C * lab.proxies.reduce((sum, x) => sum + Math.sqrt(x * (x + 1)), 0);
+      const lattice = Math.sqrt(lab.proxies.reduce((sum, x) => {
+        const nearest = Math.max(.5, Math.round(2 * x) / 2);
+        return sum + (x - nearest) ** 2;
+      }, 0) / lab.proxies.length);
+      const logDeg = lab.proxies.reduce((sum, x) => sum + Math.log(2 * x + 1), 0);
+      document.getElementById("areaMetric").textContent = area.toFixed(2);
+      document.getElementById("latticeMetric").textContent = lattice.toFixed(4);
+      document.getElementById("degMetric").textContent = logDeg.toFixed(2);
+      document.getElementById("residualMetric").textContent = (area - lab.target).toFixed(2);
+    }
+
+    function horizonFrame() {
+      const rect = horizonCanvas.getBoundingClientRect();
+      const ctx = fitCanvas(horizonCanvas, rect.width, rect.height);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      drawStars(ctx, rect.width, rect.height);
+      if (lab.running && !reducedMotion) {
+        lab.phase += .007;
+        for (let i = 0; i < lab.proxies.length; i++) {
+          const nearest = Math.max(.5, Math.round(2 * lab.proxies[i]) / 2);
+          const restoring = (nearest - lab.proxies[i]) * Math.min(.035 * lab.kappa, .2);
+          lab.proxies[i] += restoring + Math.sin(lab.phase * 4 + i * 2.1) * .0007;
+        }
+      }
+      drawBlackHole(ctx, lab.cx || rect.width / 2, lab.cy || rect.height / 2, Math.min(rect.width, rect.height) * .16, lab.phase, lab.n, lab.proxies);
+      updateMetrics();
+      requestAnimationFrame(horizonFrame);
+    }
+    requestAnimationFrame(horizonFrame);
+
+    function pointerPosition(event) {
+      const rect = horizonCanvas.getBoundingClientRect();
+      return {x: event.clientX - rect.left, y: event.clientY - rect.top};
+    }
+    horizonCanvas.addEventListener("pointerdown", event => {
+      const p = pointerPosition(event);
+      const radius = Math.min(horizonCanvas.clientWidth, horizonCanvas.clientHeight) * .28;
+      if (Math.hypot(p.x - lab.cx, p.y - lab.cy) <= radius) {
+        lab.dragging = true;
+        horizonCanvas.classList.add("dragging");
+        horizonCanvas.setPointerCapture(event.pointerId);
+      }
+    });
+    horizonCanvas.addEventListener("pointermove", event => {
+      if (!lab.dragging) return;
+      const p = pointerPosition(event);
+      const margin = 90;
+      lab.cx = Math.max(margin, Math.min(horizonCanvas.clientWidth - margin, p.x));
+      lab.cy = Math.max(margin, Math.min(horizonCanvas.clientHeight - margin, p.y));
+    });
+    horizonCanvas.addEventListener("pointerup", event => {
+      lab.dragging = false;
+      horizonCanvas.classList.remove("dragging");
+      if (horizonCanvas.hasPointerCapture(event.pointerId)) horizonCanvas.releasePointerCapture(event.pointerId);
+    });
+
+    nSlider.addEventListener("input", () => { lab.n = +nSlider.value; document.getElementById("nOut").value = lab.n; rebuildProxies(); });
+    kSlider.addEventListener("input", () => { lab.kappa = +kSlider.value; document.getElementById("kOut").value = lab.kappa.toFixed(1); rebuildProxies(); });
+    gSlider.addEventListener("input", () => { lab.gamma = +gSlider.value; document.getElementById("gOut").value = lab.gamma.toFixed(3); });
+    aSlider.addEventListener("input", () => { lab.target = +aSlider.value; document.getElementById("aOut").value = lab.target.toFixed(0); });
+    document.getElementById("pulseButton").addEventListener("click", event => { lab.running = !lab.running; event.currentTarget.textContent = lab.running ? "Pause HMC pulse" : "Resume HMC pulse"; });
+    document.getElementById("resetButton").addEventListener("click", () => { lab.cx = horizonCanvas.clientWidth / 2; lab.cy = horizonCanvas.clientHeight / 2; lab.phase = 0; rebuildProxies(); });
+
+    const combCanvas = document.getElementById("combCanvas");
+    const xSlider = document.getElementById("xSlider");
+    const combKSlider = document.getElementById("combKSlider");
+    function drawComb() {
+      const rect = combCanvas.getBoundingClientRect();
+      if (!rect.width) return;
+      const ctx = fitCanvas(combCanvas, rect.width, rect.height);
+      const pad = {left: 58, right: 24, top: 32, bottom: 48};
+      const width = rect.width - pad.left - pad.right;
+      const height = rect.height - pad.top - pad.bottom;
+      const kappa = +combKSlider.value;
+      const currentX = +xSlider.value;
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      drawStars(ctx, rect.width, rect.height);
+      ctx.strokeStyle = "rgba(255,255,255,.12)";
+      ctx.lineWidth = 1;
+      for (let h = .5; h <= 4.001; h += .5) {
+        const px = pad.left + ((h - .5) / 3.5) * width;
+        ctx.beginPath(); ctx.moveTo(px, pad.top); ctx.lineTo(px, pad.top + height); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "12px system-ui"; ctx.textAlign = "center"; ctx.fillText(h.toFixed(1), px, pad.top + height + 24);
+      }
+      for (let y = 0; y <= kappa; y += Math.max(kappa / 4, .1)) {
+        const py = pad.top + height - (y / kappa) * height;
+        ctx.beginPath(); ctx.moveTo(pad.left, py); ctx.lineTo(pad.left + width, py); ctx.stroke();
+      }
+      const gradient = ctx.createLinearGradient(pad.left, 0, pad.left + width, 0);
+      gradient.addColorStop(0, "#f6bd58"); gradient.addColorStop(.5, "#9c7cff"); gradient.addColorStop(1, "#62d9ff");
+      ctx.strokeStyle = gradient; ctx.lineWidth = 3; ctx.beginPath();
+      for (let i = 0; i <= 600; i++) {
+        const x = .5 + 3.5 * i / 600;
+        const value = kappa * Math.sin(2 * Math.PI * x) ** 2;
+        const px = pad.left + (i / 600) * width;
+        const py = pad.top + height - value / kappa * height;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      const value = kappa * Math.sin(2 * Math.PI * currentX) ** 2;
+      const px = pad.left + ((currentX - .5) / 3.5) * width;
+      const py = pad.top + height - value / kappa * height;
+      ctx.fillStyle = "#ff6f91"; ctx.shadowBlur = 18; ctx.shadowColor = "#ff6f91"; ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.textAlign = "left"; ctx.font = "12px system-ui"; ctx.fillText("κQ · sin²(2πx)", pad.left, 18);
+
+      const derivative = 2 * Math.PI * kappa * Math.sin(4 * Math.PI * currentX);
+      const nearest = Math.max(.5, Math.round(2 * currentX) / 2);
+      document.getElementById("xOut").value = currentX.toFixed(3);
+      document.getElementById("combKOut").value = kappa.toFixed(1);
+      document.getElementById("vReadout").textContent = value.toFixed(6);
+      document.getElementById("gradReadout").textContent = derivative.toFixed(6);
+      document.getElementById("nearestReadout").textContent = nearest.toFixed(1);
+      document.getElementById("distanceReadout").textContent = Math.abs(currentX - nearest).toFixed(4);
+    }
+    xSlider.addEventListener("input", drawComb);
+    combKSlider.addEventListener("input", drawComb);
+    window.addEventListener("resize", () => { resizeHorizon(); drawComb(); });
+    resizeHorizon();
+    drawComb();
+  </script>
+</body>
+</html>

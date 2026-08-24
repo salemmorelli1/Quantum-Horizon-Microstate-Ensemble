@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Quantum Horizon Microstate Ensemble"
+type: software
+authors:
+  - family-names: Morelli
+    given-names: Salem
+version: 0.1.0
+date-released: 2026-08-23
+url: "https://github.com/salemmorelli1/Quantum-Horizon-Microstate-Ensemble"
+repository-code: "https://github.com/salemmorelli1/Quantum-Horizon-Microstate-Ensemble"
+license: MIT
+keywords:
+  - Hamiltonian Monte Carlo
+  - loop quantum gravity
+  - microstate ensembles
+  - PyTorch
+  - quantum black holes
