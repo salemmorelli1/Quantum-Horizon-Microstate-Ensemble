@@ -184,6 +184,21 @@ class StatisticalDiagnosticsTests(unittest.TestCase):
         for scale in (1e-20, 1e200):
             self.assertAlmostEqual(effective_sample_size(scale * trace), reference, places=10)
 
+    def test_ess_preserves_variation_under_exactly_representable_offsets(self) -> None:
+        pattern = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0]
+        trace = torch.tensor(pattern * 40, dtype=torch.float64)
+        shifted = trace + 3 * 2**51
+        torch.testing.assert_close(shifted - 3 * 2**51, trace, rtol=0, atol=0)
+        self.assertAlmostEqual(
+            effective_sample_size(shifted), effective_sample_size(trace), places=10
+        )
+
+    def test_ess_handles_finite_values_whose_differences_overflow(self) -> None:
+        trace = torch.tensor([-1e308, 1e308] * 16, dtype=torch.float64)
+        ess = effective_sample_size(trace)
+        self.assertTrue(math.isfinite(ess))
+        self.assertTrue(0 < ess <= trace.numel())
+
     def test_ess_distinguishes_iid_and_correlated_draws(self) -> None:
         noise = torch.randn(4608, dtype=torch.float64, generator=torch.Generator().manual_seed(93))
         trace = torch.zeros_like(noise)

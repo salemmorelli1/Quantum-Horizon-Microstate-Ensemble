@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
 import platform
 import sys
 import tempfile
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 
 from .validation import validate_samples
+
+
+@dataclass(frozen=True)
+class SampleSnapshot:
+    """Verified samples, producer metadata, and digest of the exact loaded bytes."""
+
+    samples: torch.Tensor
+    metadata: dict[str, Any]
+    file_sha256: str
 
 
 def tensor_to_data(value: Any) -> Any:
@@ -66,21 +76,26 @@ def write_samples_atomic(
     samples: torch.Tensor,
     *,
     metadata: dict[str, Any] | None = None,
-) -> None:
+) -> str:
+    """Atomically publish a sample envelope and return its written-file digest."""
+
     validate_samples(samples)
     payload = {
-        "schema_version": "2.0",
+        "schema_version": "2.1",
         "samples": samples.detach().cpu(),
         "samples_sha256": tensor_sha256(samples),
         "metadata": tensor_to_data(metadata or {}),
     }
     payload["metadata_sha256"] = _metadata_sha256(payload["metadata"])
+    payload["envelope_sha256"] = _envelope_sha256(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
     try:
         torch.save(payload, temporary)
+        written_digest = sha256(temporary)
         os.replace(temporary, path)
+        return written_digest
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -96,8 +111,21 @@ def read_sample_artifact(
     *,
     expected_config_sha256: str | None = None,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
-    payload = torch.load(path, map_location="cpu", weights_only=True)
-    if not isinstance(payload, dict) or payload.get("schema_version") != "2.0":
+    snapshot = read_sample_snapshot(path, expected_config_sha256=expected_config_sha256)
+    return snapshot.samples, snapshot.metadata
+
+
+def read_sample_snapshot(
+    path: Path,
+    *,
+    expected_config_sha256: str | None = None,
+) -> SampleSnapshot:
+    # Parse and hash the same immutable byte snapshot. Rereading a pathname
+    # after torch.load could otherwise label an older tensor with a newer run's
+    # file hash when another process atomically replaces the file.
+    content = path.read_bytes()
+    payload = torch.load(io.BytesIO(content), map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict) or payload.get("schema_version") != "2.1":
         raise ValueError(
             "Unverified legacy sample artifact; regenerate it with the audited sampler"
         )
@@ -110,6 +138,8 @@ def read_sample_artifact(
         raise ValueError("Invalid sample metadata")
     if payload.get("metadata_sha256") != _metadata_sha256(metadata):
         raise ValueError("Sample metadata SHA-256 mismatch")
+    if payload.get("envelope_sha256") != _envelope_sha256(payload):
+        raise ValueError("Sample envelope SHA-256 mismatch")
     if expected_config_sha256 is not None:
         if metadata.get("config_sha256") != expected_config_sha256:
             raise ValueError("Sample/configuration SHA-256 mismatch")
@@ -119,7 +149,16 @@ def read_sample_artifact(
             raise ValueError("Sample artifact is missing run/source provenance")
         if metadata.get("source_sha256") != source_sha256():
             raise ValueError("Sample/source SHA-256 mismatch; regenerate with the current source")
-    return samples, metadata
+    return SampleSnapshot(samples, metadata, hashlib.sha256(content).hexdigest())
+
+
+def _envelope_sha256(payload: dict[str, Any]) -> str:
+    # The independent component digests alone would permit mixing a valid
+    # tensor/digest from run B with a valid metadata/digest from run A.
+    binding = {key: payload[key] for key in ("schema_version", "samples_sha256", "metadata_sha256")}
+    return hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _metadata_sha256(metadata: dict[str, Any]) -> str:

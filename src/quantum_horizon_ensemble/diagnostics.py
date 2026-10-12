@@ -28,15 +28,19 @@ def effective_sample_size(trace: Tensor) -> float | None:
     n = values.numel()
     if n < 4:
         return None
-    absolute_scale = values.abs().max()
-    if absolute_scale == 0.0:
-        return None
-    values = values / absolute_scale
-    centered = values - values.mean()
+    # Remove the location before scaling. Scaling large-offset, small-spread
+    # values directly can round away variation that is present in the input.
+    centered = values - values[0]
+    if not torch.isfinite(centered).all():
+        # Finite values of opposite signs can overflow on subtraction; only
+        # that case needs scaling before the location is removed.
+        values = values / values.abs().max()
+        centered = values - values[0]
     scale = centered.abs().max()
     if scale == 0.0:
         return None
-    centered = centered / scale  # ESS must be invariant to measurement units.
+    centered = centered / scale
+    centered = centered - centered.mean()
     fft_size = 1 << (2 * n - 1).bit_length()
     spectrum = torch.fft.rfft(centered, n=fft_size)
     autocovariance = torch.fft.irfft(spectrum * spectrum.conj(), n=fft_size)[:n]

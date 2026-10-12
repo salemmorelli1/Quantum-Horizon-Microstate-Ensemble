@@ -93,6 +93,70 @@ class ArtifactProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metadata SHA-256 mismatch"):
             read_samples(self.samples)
 
+    def test_valid_components_from_two_runs_cannot_be_combined(self) -> None:
+        other = self.root / "other.pt"
+        save_experiment(
+            self.config, seed=456, samples_path=other, summary_path=self.root / "other.json"
+        )
+        first = torch.load(self.samples, weights_only=True)
+        second = torch.load(other, weights_only=True)
+        first["samples"] = second["samples"]
+        first["samples_sha256"] = second["samples_sha256"]
+        torch.save(first, self.samples)
+        with self.assertRaisesRegex(ValueError, "envelope SHA-256 mismatch"):
+            verified_analysis_input(self.config, self.samples)
+
+    def test_analysis_hashes_loaded_snapshot_when_file_is_replaced(self) -> None:
+        original_digest = sha256(self.samples)
+        original_samples = read_samples(self.samples)
+        replacement = self.root / "replacement.pt"
+        save_experiment(
+            self.config,
+            seed=456,
+            samples_path=replacement,
+            summary_path=self.root / "replacement.json",
+        )
+        replacement_bytes = replacement.read_bytes()
+        real_load = torch.load
+
+        def replace_after_load(*args, **kwargs):
+            payload = real_load(*args, **kwargs)
+            self.samples.write_bytes(replacement_bytes)
+            return payload
+
+        with patch("quantum_horizon_ensemble.artifacts.torch.load", side_effect=replace_after_load):
+            _, samples, _, producer = verified_analysis_input(self.config, self.samples)
+        torch.testing.assert_close(samples, original_samples)
+        self.assertEqual(producer["seed"], 123)
+        self.assertEqual(producer["samples_file_sha256"], original_digest)
+        self.assertNotEqual(producer["samples_file_sha256"], sha256(self.samples))
+
+    def test_summary_hashes_written_run_when_file_is_replaced(self) -> None:
+        replacement = self.root / "replacement.pt"
+        save_experiment(
+            self.config,
+            seed=456,
+            samples_path=replacement,
+            summary_path=self.root / "replacement.json",
+        )
+        replacement_bytes = replacement.read_bytes()
+        written_digests = []
+
+        def replace_after_write(*args, **kwargs):
+            digest = write_samples_atomic(*args, **kwargs)
+            written_digests.append(sha256(self.samples))
+            self.samples.write_bytes(replacement_bytes)
+            return digest
+
+        with patch(
+            "quantum_horizon_ensemble.cli.write_samples_atomic", side_effect=replace_after_write
+        ):
+            payload = save_experiment(
+                self.config, seed=123, samples_path=self.samples, summary_path=self.summary
+            )
+        self.assertEqual(payload["provenance"]["samples_file_sha256"], written_digests[0])
+        self.assertNotEqual(payload["provenance"]["samples_file_sha256"], sha256(self.samples))
+
     def test_changed_producer_source_is_rejected(self) -> None:
         with patch("quantum_horizon_ensemble.artifacts.source_sha256", return_value="0" * 64):
             with self.assertRaisesRegex(ValueError, "source SHA-256 mismatch"):

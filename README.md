@@ -152,8 +152,11 @@ python run_research_pipeline.py
 Use `--output-root PATH` to isolate a run's artifacts and `--seed INTEGER` to
 override the configured seed. Paths are resolved from the caller's directory.
 Parts 1–3 preserve the actual seed, run ID, configuration digest, source digest,
-and sample-file digest. Old `samples.pt` files without schema-2 provenance must
-be regenerated; the audited pipeline will reject them.
+and sample-file digest. Sample envelope 2.1 also binds the tensor and producer
+metadata with a joint digest. Its file digest refers to the exact byte snapshot
+loaded or atomically written, even if another run replaces the pathname.
+Older `samples.pt` files, including envelope 2.0 files, must be regenerated;
+the audited pipeline will reject them.
 
 Sampling reports use `WARN` or `DIAGNOSTICS_ONLY` for exploratory runs and
 `FAIL` for a fully stuck/rejected chain. A successful process exit means the
@@ -188,10 +191,12 @@ ruff check .
 python -m build
 ```
 
-The audit suite additionally checks HMC against independent one-dimensional
+The 55-test audit suite additionally checks HMC against independent one-dimensional
 quadrature, thermodynamic-integrand signs, correlated-trace ESS, effective-seed
 provenance, swapped/corrupt sample rejection, strict finite input, and disposable
-subprocess pipelines. CI verifies Python 3.11 and 3.12 on Linux and Windows.
+subprocess pipelines. It also checks mixed-run component rejection, file
+replacement during analysis/publication, and offset-invariant ESS. CI verifies
+Python 3.11 and 3.12 on Linux and Windows.
 
 The tests verify the physical lower bound, comb zeros, proper latent tail,
 closed-form/autograd gradient agreement, area-matched initialization, half-integer

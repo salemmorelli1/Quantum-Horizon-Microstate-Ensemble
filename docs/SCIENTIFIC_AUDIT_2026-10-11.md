@@ -30,6 +30,7 @@ remain future work. This audit does not add or claim those methods.
 | Constant-trace ESS | 80 identical draws returned ESS = 80 | ESS is unidentified (`null`); stuck coordinates are reported and a fully rejected/stuck chain fails |
 | Autocorrelation truncation | Pairing started at lags 1+2 and omitted the monotone restriction | Pair lags 0+1, 2+3, ... using the initial positive, monotone sequence; conservative cap at draws; FFT evaluation |
 | Unit-dependent ESS | Tiny but varying traces were treated as constant by an absolute machine-epsilon cutoff | Normalize trace scale before autocorrelation; constant and <4-draw traces are explicitly unidentified |
+| Large-offset ESS rounding | An exactly representable additive offset changed ESS from 128.636232 to 125.805169 | Remove the offset before scaling; fall back to prescaling only when subtraction would overflow |
 | Thermodynamic sign | A test trace saved +0.5178176 as the log-normalizer integrand | Save `d log Z / d kappa_Q = -E[Q]`; the mean comb statistic remains positive |
 | Unconditional sampling PASS | Failed/rejected/divergent or inadequate chains could be called PASS | Sampling states are FAIL, WARN, or DIAGNOSTICS_ONLY; convergence is NOT_ASSESSED_SINGLE_CHAIN |
 | Incomplete numerical validation | NaN area targets, NaN step sizes, negative divergence thresholds and numeric booleans were accepted | Reject nonfinite controls, invalid integer/boolean controls, invalid vectors, and metric broadcasting before sampling |
@@ -37,6 +38,8 @@ remain future work. This audit does not add or claim those methods.
 | Unbounded adaptation arithmetic | Extreme dual-averaging log step sizes could overflow/underflow | Bound log step during warmup; retained sampling still uses a frozen adapted kernel |
 | Nonfinite artifact serialization | Tensor conversion could bypass scalar sanitization and emit NaN/Infinity; some scalar failures became null | Recursively reject nonfinite JSON; unidentified diagnostics use explicit null; clean temporary files on write failure |
 | Unidentified sample files | A bare tensor could be analyzed under another same-dimensional configuration | Schema-2 envelope verifies sample-content, metadata, input-config and producer-source SHA-256 |
+| Separately valid components could be mixed | A tensor and tensor digest from seed 456 passed with metadata and metadata digest from seed 123 | Envelope 2.1 jointly binds the validated tensor and metadata digests |
+| File-replacement provenance race | Loading run A then hashing its replaced pathname recorded run B's file digest | Hash and load the same byte snapshot; return the exact written-file digest from atomic publication |
 | Incorrect overridden-seed provenance | Parts 2/3 copied the configured seed rather than the actual sampling override | Preserve the producer's effective seed, unique run ID, environment and sample-file digest through Parts 1–3 |
 | Path-dependent pipeline | Relative config paths were interpreted after changing to the repository directory | Resolve caller paths and support an isolated output root; run Part 4 from the repository root |
 | Mixed coordinate curvature descriptions | Latent area-gradient curvature and proxy-spin comb curvature shared a summary | Explicitly identify coordinate conventions and partial-curvature proxies |
@@ -45,12 +48,14 @@ remain future work. This audit does not add or claim those methods.
 
 Hashes establish reproducibility and detect accidental corruption; they are not
 cryptographic attestations of who generated an artifact. The source digest
-covers the installed package's Python modules. Schema-1 sample files cannot
-receive new provenance by reanalysis: regenerate them using the full pipeline.
+covers the installed package's Python modules. Sample envelopes older than 2.1,
+including the earlier 2.0 envelope, cannot receive new provenance by reanalysis:
+regenerate them using the full pipeline. The snapshot loader temporarily holds
+the serialized bytes as well as the loaded tensor to prevent pathname races.
 
 ## Verification
 
-The original 11 tests pass, and the expanded suite contains **50 tests**.
+The original 11 tests pass, and the expanded suite contains **55 tests**.
 Independent numerical checks include:
 
 - One-dimensional continuous target moments from direct quadrature versus HMC
@@ -61,6 +66,10 @@ Independent numerical checks include:
   gradient agreement in both Softplus tails.
 - Rejection of invalid configurations, nonfinite proposals, changed sample
   values, changed seed metadata, swapped configurations, and changed source.
+- Rejection of mixed components from two individually valid runs; correct
+  producer/file attribution when a pathname changes after loading or writing.
+- ESS invariance under exactly representable large offsets and finite traces
+  whose direct differences overflow floating-point range.
 - Repeated seeded sampling without modifying the caller's default dtype.
 - Real CLI/pipeline subprocesses from a different working directory, with an
   overridden seed and disposable artifacts.

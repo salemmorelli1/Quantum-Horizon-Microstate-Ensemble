@@ -17,7 +17,7 @@ import torch
 from . import __version__
 from .artifacts import (
     provenance,
-    read_sample_artifact,
+    read_sample_snapshot,
     sha256,
     source_sha256,
     tensor_to_data,
@@ -238,8 +238,8 @@ def save_experiment(
     metadata = dict(result.metadata or {})
     metadata["sampling_status"] = payload["status"]
     metadata["diagnostic_warnings"] = payload["diagnostic_warnings"]
-    write_samples_atomic(samples_path, result.samples, metadata=metadata)
-    payload["provenance"]["samples_file_sha256"] = sha256(samples_path)
+    written_digest = write_samples_atomic(samples_path, result.samples, metadata=metadata)
+    payload["provenance"]["samples_file_sha256"] = written_digest
     write_json_atomic(summary_path, payload)
     return payload
 
@@ -250,10 +250,11 @@ def verified_analysis_input(
 ) -> tuple[RelaxedHorizonEnsemble, torch.Tensor, dict[str, Any], dict[str, Any]]:
     content = config_path.read_bytes()
     ensemble, hmc, _, raw = _decode_config(content)
-    samples, metadata = read_sample_artifact(
+    snapshot = read_sample_snapshot(
         samples_path,
         expected_config_sha256=hashlib.sha256(content).hexdigest(),
     )
+    samples, metadata = snapshot.samples, snapshot.metadata
     validate_samples(samples, n_punctures=ensemble.n_punctures)
     if samples.shape[0] != hmc.num_samples:
         raise ValueError("Sample artifact draw count does not match the configuration")
@@ -262,7 +263,7 @@ def verified_analysis_input(
     if metadata.get("sampling_status") not in ("WARN", "DIAGNOSTICS_ONLY"):
         raise ValueError("Sample artifact lacks a usable producer sampling assessment")
     producer = {key: value for key, value in metadata.items() if key != "config"}
-    producer["samples_file_sha256"] = sha256(samples_path)
+    producer["samples_file_sha256"] = snapshot.file_sha256
     return RelaxedHorizonEnsemble(ensemble), samples, raw, producer
 
 
