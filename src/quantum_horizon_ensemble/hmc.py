@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from .model import RelaxedHorizonEnsemble, Tensor
+from .validation import require_finite, require_float_tensor, require_integer
 
 
 @dataclass(frozen=True)
@@ -31,8 +32,27 @@ class HMCConfig:
     divergence_threshold: float = 1000.0
 
     def validate(self) -> None:
-        if self.num_samples < 1 or self.warmup_steps < 0:
-            raise ValueError("num_samples must be positive and warmup_steps nonnegative")
+        for name, minimum in (
+            ("num_samples", 1),
+            ("warmup_steps", 0),
+            ("min_leapfrog_steps", 1),
+            ("max_leapfrog_steps", 1),
+            ("mass_update_interval", 5),
+        ):
+            require_integer(name, getattr(self, name), minimum=minimum)
+        for name in (
+            "step_size",
+            "step_jitter",
+            "target_accept",
+            "mass_ridge",
+            "minimum_mass",
+            "maximum_mass",
+            "divergence_threshold",
+        ):
+            require_finite(name, getattr(self, name))
+        for name in ("adapt_step_size", "adapt_diagonal_mass"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
         if self.step_size <= 0.0:
             raise ValueError("step_size must be positive")
         if not 1 <= self.min_leapfrog_steps <= self.max_leapfrog_steps:
@@ -47,6 +67,8 @@ class HMCConfig:
             raise ValueError("mass_ridge must be positive")
         if not 0.0 < self.minimum_mass <= self.maximum_mass:
             raise ValueError("Invalid mass bounds")
+        if self.divergence_threshold <= 0.0:
+            raise ValueError("divergence_threshold must be positive")
 
     @classmethod
     def from_mapping(cls, values: dict[str, Any]) -> HMCConfig:
@@ -65,10 +87,9 @@ class DiagonalMetric:
     mass_diag: Tensor
 
     def __post_init__(self) -> None:
-        if self.mass_diag.ndim != 1:
-            raise ValueError("mass_diag must be one-dimensional")
-        if not torch.isfinite(self.mass_diag).all():
-            raise ValueError("mass_diag must be finite")
+        require_float_tensor("mass_diag", self.mass_diag)
+        if self.mass_diag.ndim != 1 or self.mass_diag.numel() < 1:
+            raise ValueError("mass_diag must be a nonempty one-dimensional tensor")
         if torch.any(self.mass_diag <= 0.0):
             raise ValueError("All mass entries must be positive")
 
@@ -82,10 +103,20 @@ class DiagonalMetric:
         return torch.sqrt(self.mass_diag) * noise
 
     def velocity(self, momentum: Tensor) -> Tensor:
+        self.validate_vector(momentum)
         return momentum / self.mass_diag
 
     def kinetic_energy(self, momentum: Tensor) -> Tensor:
+        self.validate_vector(momentum)
         return 0.5 * torch.sum(momentum.square() / self.mass_diag)
+
+    def validate_vector(self, vector: Tensor) -> None:
+        if (
+            vector.shape != self.mass_diag.shape
+            or vector.dtype != self.mass_diag.dtype
+            or vector.device != self.mass_diag.device
+        ):
+            raise ValueError("Metric and trajectory vectors must share shape, dtype, and device")
 
 
 @dataclass(frozen=True)
@@ -109,6 +140,7 @@ class HMCResult:
     diagnostics: tuple[HMCDiagnostic, ...]
     final_step_size: float
     final_mass_diag: Tensor
+    metadata: dict[str, Any] | None = None
 
 
 def potential_and_grad(
@@ -119,14 +151,14 @@ def potential_and_grad(
 
     z_leaf = z.detach().requires_grad_(True)
     potential = model(z_leaf)
+    if potential.ndim != 0 or not torch.isfinite(potential):
+        raise FloatingPointError("Nonfinite or nonscalar potential energy")
     (gradient,) = torch.autograd.grad(
         outputs=potential,
         inputs=z_leaf,
         create_graph=False,
         retain_graph=False,
     )
-    if not torch.isfinite(potential):
-        raise FloatingPointError("Nonfinite potential energy")
     if not torch.isfinite(gradient).all():
         raise FloatingPointError("Nonfinite potential gradient")
     return potential.detach(), gradient.detach()
@@ -143,8 +175,13 @@ def leapfrog(
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Apply a reversible, volume-preserving leapfrog trajectory."""
 
-    if step_size <= 0.0 or n_steps < 1:
+    require_finite("step_size", step_size)
+    require_integer("n_steps", n_steps, minimum=1)
+    if step_size <= 0.0:
         raise ValueError("step_size must be positive and n_steps at least one")
+    metric.validate_vector(initial_z)
+    metric.validate_vector(initial_momentum)
+    require_float_tensor("initial momentum", initial_momentum)
 
     z = initial_z.detach().clone()
     momentum = initial_momentum.detach().clone()
@@ -153,6 +190,8 @@ def leapfrog(
 
     for step in range(n_steps):
         z = z + step_size * metric.velocity(momentum)
+        if not torch.isfinite(z).all():
+            raise FloatingPointError("Nonfinite trajectory position")
         potential, gradient = potential_and_grad(model, z)
         if step != n_steps - 1:
             momentum = momentum - step_size * gradient
@@ -176,6 +215,14 @@ def hmc_transition(
 ) -> tuple[Tensor, HMCDiagnostic]:
     """Perform one Metropolis-corrected HMC transition."""
 
+    require_finite("divergence_threshold", divergence_threshold)
+    if divergence_threshold <= 0.0:
+        raise ValueError("divergence_threshold must be positive")
+    require_finite("step_size", step_size)
+    if step_size <= 0.0:
+        raise ValueError("step_size must be positive")
+    require_integer("n_steps", n_steps, minimum=1)
+    metric.validate_vector(current_z)
     current_z = current_z.detach()
     current_momentum = metric.sample_momentum(generator)
     current_potential, _ = potential_and_grad(model, current_z)
@@ -190,16 +237,12 @@ def hmc_transition(
             step_size=step_size,
             n_steps=n_steps,
         )
-        proposed_hamiltonian = proposed_potential + metric.kinetic_energy(
-            proposed_momentum
-        )
+        proposed_hamiltonian = proposed_potential + metric.kinetic_energy(proposed_momentum)
         delta_energy_tensor = proposed_hamiltonian - current_hamiltonian
         if not torch.isfinite(delta_energy_tensor):
             raise FloatingPointError("Nonfinite Hamiltonian error")
 
-        log_acceptance = torch.minimum(
-            torch.zeros_like(delta_energy_tensor), -delta_energy_tensor
-        )
+        log_acceptance = torch.minimum(torch.zeros_like(delta_energy_tensor), -delta_energy_tensor)
         acceptance_probability = torch.exp(log_acceptance)
         log_uniform = torch.log(
             torch.rand(
@@ -240,6 +283,9 @@ class DualAveraging:
     """Nesterov dual averaging for warmup-only step-size adaptation."""
 
     def __init__(self, initial_step_size: float, target: float):
+        require_finite("target_accept", target)
+        if not 0.0 < target < 1.0:
+            raise ValueError("target_accept must lie in (0, 1)")
         self.target = target
         self.gamma = 0.05
         self.t0 = 10.0
@@ -247,24 +293,28 @@ class DualAveraging:
         self.reset(initial_step_size)
 
     def reset(self, initial_step_size: float) -> None:
-        self.mu = math.log(10.0 * initial_step_size)
+        require_finite("initial_step_size", initial_step_size)
+        if initial_step_size <= 0.0:
+            raise ValueError("initial_step_size must be positive")
+        self.mu = math.log(initial_step_size) + math.log(10.0)
         self.log_step = math.log(initial_step_size)
         self.log_step_average = math.log(initial_step_size)
         self.h_average = 0.0
         self.iteration = 0
 
     def update(self, acceptance_probability: float) -> float:
+        require_finite("acceptance_probability", acceptance_probability)
+        if not 0.0 <= acceptance_probability <= 1.0:
+            raise ValueError("acceptance_probability must lie in [0, 1]")
         self.iteration += 1
         t = float(self.iteration)
         eta = 1.0 / (t + self.t0)
-        self.h_average = (1.0 - eta) * self.h_average + eta * (
-            self.target - acceptance_probability
-        )
-        self.log_step = self.mu - math.sqrt(t) * self.h_average / self.gamma
+        self.h_average = (1.0 - eta) * self.h_average + eta * (self.target - acceptance_probability)
+        # Avoid overflow/underflow during extreme warmup. Adaptation is still
+        # restricted to warmup, so this numerical bound does not alter sampling.
+        self.log_step = max(-30.0, min(10.0, self.mu - math.sqrt(t) * self.h_average / self.gamma))
         weight = t ** (-self.kappa)
-        self.log_step_average = (
-            weight * self.log_step + (1.0 - weight) * self.log_step_average
-        )
+        self.log_step_average = weight * self.log_step + (1.0 - weight) * self.log_step_average
         return math.exp(self.log_step)
 
     def final_step_size(self) -> float:
@@ -307,12 +357,8 @@ def _randomized_controls(
     step_size: float,
     generator: torch.Generator | None,
 ) -> tuple[float, int]:
-    jitter = torch.rand(
-        (), dtype=z.dtype, device=z.device, generator=generator
-    )
-    randomized_step = step_size * torch.exp(
-        config.step_jitter * (2.0 * jitter - 1.0)
-    ).item()
+    jitter = torch.rand((), dtype=z.dtype, device=z.device, generator=generator)
+    randomized_step = step_size * torch.exp(config.step_jitter * (2.0 * jitter - 1.0)).item()
     n_steps = int(
         torch.randint(
             config.min_leapfrog_steps,
@@ -335,6 +381,7 @@ def sample_hmc(
     """Run adaptive warmup and then a fixed-kernel HMC chain."""
 
     config.validate()
+    model._validate_position(initial_z)
     z = initial_z.detach().clone()
     metric = DiagonalMetric(torch.ones_like(z))
     moments = DiagonalWelford(z)
@@ -346,9 +393,7 @@ def sample_hmc(
     total = config.warmup_steps + config.num_samples
     for iteration in range(total):
         warmup = iteration < config.warmup_steps
-        randomized_step, n_steps = _randomized_controls(
-            z, config, step_size, generator
-        )
+        randomized_step, n_steps = _randomized_controls(z, config, step_size, generator)
         z, diagnostic = hmc_transition(
             model,
             z,

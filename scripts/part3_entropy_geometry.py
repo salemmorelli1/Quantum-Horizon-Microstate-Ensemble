@@ -6,10 +6,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from quantum_horizon_ensemble.artifacts import provenance, read_samples, write_json_atomic
-from quantum_horizon_ensemble.cli import load_experiment_config
+from quantum_horizon_ensemble.artifacts import write_json_atomic
+from quantum_horizon_ensemble.cli import verified_analysis_input
 from quantum_horizon_ensemble.diagnostics import geometry_summary
-from quantum_horizon_ensemble.model import RelaxedHorizonEnsemble
 
 
 def main() -> int:
@@ -19,13 +18,13 @@ def main() -> int:
     parser.add_argument("--output", default="artifacts/part3/geometry_summary.json")
     args = parser.parse_args()
     config_path = Path(args.config)
-    ensemble, _, runtime, raw = load_experiment_config(config_path)
-    model = RelaxedHorizonEnsemble(ensemble)
+    model, samples, raw, producer = verified_analysis_input(config_path, Path(args.samples))
     payload = {
-        "schema_version": "1.0",
-        "status": "PASS",
+        "schema_version": "2.0",
+        "status": producer["sampling_status"],
+        "convergence_status": "NOT_ASSESSED_SINGLE_CHAIN",
         "config": raw,
-        "geometry": geometry_summary(model, read_samples(Path(args.samples))),
+        "geometry": geometry_summary(model, samples),
         "entropy_method": {
             "identity": "d log Z(kappa_Q) / d kappa_Q = -E[comb statistic]",
             "required": "replica ladder, quadrature, and calibrated reference normalizer",
@@ -34,7 +33,7 @@ def main() -> int:
                 "degeneracy correction before physical entropy inference."
             ),
         },
-        "provenance": provenance(config_path, int(runtime.get("seed", 0))),
+        "provenance": producer,
     }
     write_json_atomic(Path(args.output), payload)
     print(f"Wrote {args.output}")

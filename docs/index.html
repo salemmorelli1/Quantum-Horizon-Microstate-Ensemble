@@ -308,6 +308,7 @@
           <button class="button" type="button" data-open-tab="lab">Open horizon lab</button>
           <a class="button secondary" href="Differentiable_Quantum_Horizon_Ensembles_APA_Report.pdf">Read the Report</a>
         </div>
+        <p class="hero-copy">The PDF records an earlier baseline. Read the <a href="https://github.com/salemmorelli1/Quantum-Horizon-Microstate-Ensemble/blob/main/docs/SCIENTIFIC_AUDIT_2026-10-11.md">scientific audit</a> for the corrected diagnostics and current research limits.</p>
       </div>
       <figure class="hero-card">
         <canvas id="heroCanvas" width="640" height="520" aria-label="Animated quantum horizon with punctures"></canvas>
@@ -391,7 +392,7 @@
         <article class="node"><small>Transform</small><h3>x = ½ + Softplus(z)</h3><p>Smooth physical lower bound and Jacobian.</p></article>
         <article class="node"><small>Potential</small><h3>Area + comb + proxy</h3><p>One global residual and coordinatewise wells.</p></article>
         <article class="node"><small>Gradient</small><h3>torch.autograd.grad</h3><p>Exact reverse-mode field in O(N).</p></article>
-        <article class="node"><small>Sampler</small><h3>HMC / NUTS</h3><p>Warmup adaptation, MH correction, diagnostics.</p></article>
+        <article class="node"><small>Sampler</small><h3>HMC</h3><p>Warmup adaptation, MH correction, diagnostics. NUTS is a planned extension.</p></article>
       </div>
       <div class="equation" style="margin-top:18px">∇<sup>2</sup><sub>x</sub>F = κ<sub>A</sub>C<sup>2</sup>vv<sup>T</sup> + diag(d<sub>1</sub>, …, d<sub>N</sub>)</div>
       <div class="callout"><strong>Preconditioning strategy.</strong> Use a diagonal mass for local comb curvature plus one low-rank correction aligned with the latent area gradient. A dense N×N metric is unnecessary and becomes prohibitive beyond 1,000 punctures.</div>
@@ -550,7 +551,7 @@
     function rebuildProxies() {
       lab.proxies = Array.from({length: lab.n}, (_, i) => {
         const well = .5 + ((i * 5 + 1) % 7) / 2;
-        return well + Math.sin(i * 8.31 + lab.phase) * (.22 / Math.sqrt(lab.kappa));
+        return Math.max(.5, well + Math.sin(i * 8.31 + lab.phase) * (.22 / Math.sqrt(lab.kappa)));
       });
     }
     rebuildProxies();
@@ -584,7 +585,7 @@
         for (let i = 0; i < lab.proxies.length; i++) {
           const nearest = Math.max(.5, Math.round(2 * lab.proxies[i]) / 2);
           const restoring = (nearest - lab.proxies[i]) * Math.min(.035 * lab.kappa, .2);
-          lab.proxies[i] += restoring + Math.sin(lab.phase * 4 + i * 2.1) * .0007;
+          lab.proxies[i] = Math.max(.5, lab.proxies[i] + restoring + Math.sin(lab.phase * 4 + i * 2.1) * .0007);
         }
       }
       drawBlackHole(ctx, lab.cx || rect.width / 2, lab.cy || rect.height / 2, Math.min(rect.width, rect.height) * .16, lab.phase, lab.n, lab.proxies);

@@ -72,6 +72,9 @@ failed stage.
 - The comb potential creates finite barriers. It concentrates probability near
   the lattice but does not guarantee rapid inter-well mixing.
 - Warmup adaptation is disabled before samples are retained.
+- Single-chain acceptance and scalar ESS do not certify convergence. Constant
+  or fewer-than-four-draw traces have unidentified ESS, reported as `null`.
+- The thermodynamic-integration field is `d log Z / d kappa_Q = -E[Q]`.
 - Gradients are never clipped because clipping would change the Hamiltonian.
 - No physical entropy is reported without normalizing-constant estimation and
   exact degeneracy correction.
@@ -126,6 +129,18 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
+For the exact audit environment, use Python 3.12 and the CPU lock:
+
+```bash
+py -3.12 -m venv .venv-qhme-audit
+source .venv-qhme-audit/Scripts/activate
+python -m pip install pip==26.2.1
+python -m pip install torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-ci-lock.txt
+python -m pip install --no-deps --no-build-isolation -e ".[dev]"
+python -m pip check
+```
+
 ## Quick start
 
 Run the validated research pipeline:
@@ -133,6 +148,19 @@ Run the validated research pipeline:
 ```bash
 python run_research_pipeline.py
 ```
+
+Use `--output-root PATH` to isolate a run's artifacts and `--seed INTEGER` to
+override the configured seed. Paths are resolved from the caller's directory.
+Parts 1–3 preserve the actual seed, run ID, configuration digest, source digest,
+and sample-file digest. Old `samples.pt` files without schema-2 provenance must
+be regenerated; the audited pipeline will reject them.
+
+Sampling reports use `WARN` or `DIAGNOSTICS_ONLY` for exploratory runs and
+`FAIL` for a fully stuck/rejected chain. A successful process exit means the
+pipeline executed; inspect `convergence_status` and `diagnostic_warnings`
+before using estimates. `NOT_ASSESSED_SINGLE_CHAIN` explicitly means that
+multichain convergence has not been assessed. The scalar ESS < 50 warning is
+an exploratory heuristic, not a confirmatory sampling threshold.
 
 Or use the installed CLI:
 
@@ -160,6 +188,11 @@ ruff check .
 python -m build
 ```
 
+The audit suite additionally checks HMC against independent one-dimensional
+quadrature, thermodynamic-integrand signs, correlated-trace ESS, effective-seed
+provenance, swapped/corrupt sample rejection, strict finite input, and disposable
+subprocess pipelines. CI verifies Python 3.11 and 3.12 on Linux and Windows.
+
 The tests verify the physical lower bound, comb zeros, proper latent tail,
 closed-form/autograd gradient agreement, area-matched initialization, half-integer
 rounding, atomic artifacts, leapfrog reversibility, and finite HMC output.
@@ -176,10 +209,17 @@ Expected page:
 
 ## Current research boundary
 
-The code samples a normalized relaxed ensemble. It does not yet identify an
+The code targets a proper relaxed ensemble without estimating its normalizing
+constant. The implemented sampler is HMC; a NUTS backend is not implemented.
+It does not yet identify an
 absolute microcanonical count. The next confirmatory stage requires a
 comb-tempered replica ladder, thermodynamic integration or bridge sampling, and
 an exact `SU(2)` intertwiner/Chern–Simons correction after discrete recovery.
+
+The [2026-10-11 scientific audit](docs/SCIENTIFIC_AUDIT_2026-10-11.md) records
+the corrections and current evidence. The existing PDF describes a historical
+baseline; its acceptance and ESS values should not be substituted for current
+run diagnostics.
 
 ## Citation
 

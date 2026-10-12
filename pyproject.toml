@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantum-horizon-microstate-ensemble"
-version = "0.1.0"
+version = "0.1.1"
 description = "Differentiable LQG-inspired microstate area ensembles and scalable PyTorch HMC"
 readme = "README.md"
 requires-python = ">=3.11"

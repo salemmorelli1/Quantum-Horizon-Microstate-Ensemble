@@ -155,8 +155,9 @@ in linear time using Sherman–Morrison.
 ## 6. Ergodicity and metastability
 
 The corrected target is smooth, proper, positive, and supported on connected
-latent space. Full Gaussian momentum refreshment and randomized short
-trajectories prevent an off-lattice region from becoming an absorbing class.
+latent space. Gaussian momentum refreshment and randomized trajectories help
+exploration; connected support and numerical acceptance alone do not prove
+global equilibration or adequate mixing among spin sectors.
 
 Nevertheless, adjacent comb wells are separated by a barrier of height
 `kappa_Q` per changed coordinate. Area-preserving microstate changes may require
@@ -173,6 +174,12 @@ The confirmatory sampler should therefore add a replica ladder
 
 with `0 = tau_0 < ... < tau_R = 1`. The flat-comb replicas explore spin sectors,
 while exchanges transmit those configurations to the target replica.
+
+The current implementation is single-chain HMC. It does not implement NUTS,
+replica exchange, rank-normalized multichain R-hat, or bulk/tail ESS. Its scalar
+ESS uses a conservative initial monotone autocorrelation sequence; short and
+constant traces are reported as unidentified. See the scientific audit for
+the schema-2 provenance and sampling-status contract.
 
 ## 7. Entropy boundary
 
