@@ -6,8 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from quantum_horizon_ensemble.artifacts import write_json_atomic, write_samples_atomic
-from quantum_horizon_ensemble.cli import analysis_payload, load_experiment_config, run_experiment
+from quantum_horizon_ensemble.cli import load_experiment_config, save_experiment
 
 
 def main() -> int:
@@ -20,13 +19,16 @@ def main() -> int:
     config_path = Path(args.config)
     _, _, runtime, _ = load_experiment_config(config_path)
     seed = int(runtime.get("seed", 0) if args.seed is None else args.seed)
-    result = run_experiment(config_path, seed_override=seed)
-    write_samples_atomic(Path(args.samples_output), result.samples)
-    payload = analysis_payload(config_path, result, seed=seed)
-    write_json_atomic(Path(args.output), payload)
+    payload = save_experiment(
+        config_path,
+        seed=seed,
+        samples_path=Path(args.samples_output),
+        summary_path=Path(args.output),
+    )
     print(f"Wrote {args.samples_output}")
     print(f"Wrote {args.output}")
-    return 0
+    print(f"Sampling status: {payload['status']}; convergence: {payload['convergence_status']}")
+    return 1 if payload["status"] == "FAIL" else 0
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/**"]
   pull_request:
     branches: [main]
 
@@ -11,18 +11,46 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: CPU verification (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      PYTHONUTF8: "1"
+      PYTHONHASHSEED: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev]"
-      - run: ruff check .
-      - run: python -m unittest discover -s tests -v
-      - run: python -m build
+          cache-dependency-path: requirements-ci-lock.txt
+      - name: Install the exact CPU verification environment
+        run: |
+          python -m pip install pip==26.2.1
+          python -m pip install torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements-ci-lock.txt
+          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
+          python -m pip check
+          python -c "import torch; assert torch.version.cuda is None; assert str(torch.__version__) == '2.14.1+cpu'"
+      - name: Compile and lint
+        run: |
+          python -m compileall -q src scripts tests run_research_pipeline.py
+          python -m ruff check .
+      - name: Run the full baseline pipeline and regression suite
+        run: python run_research_pipeline.py --output-root "$RUNNER_TEMP/qhme-verification"
+      - name: Build distributions and validate workflow syntax
+        run: |
+          python -m build --no-isolation
+          python -c "from pathlib import Path; import yaml; yaml.safe_load(Path('.github/workflows/ci.yml').read_text(encoding='utf-8'))"
+          git diff --check
+          git diff --exit-code

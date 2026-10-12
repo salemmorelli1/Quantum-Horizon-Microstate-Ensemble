@@ -3,24 +3,36 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
 import platform
 import sys
 import tempfile
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 
+from .validation import validate_samples
+
+
+@dataclass(frozen=True)
+class SampleSnapshot:
+    """Verified samples, producer metadata, and digest of the exact loaded bytes."""
+
+    samples: torch.Tensor
+    metadata: dict[str, Any]
+    file_sha256: str
+
 
 def tensor_to_data(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
         if value.ndim == 0:
-            return value.detach().cpu().item()
-        return value.detach().cpu().tolist()
+            return tensor_to_data(value.detach().cpu().item())
+        return tensor_to_data(value.detach().cpu().tolist())
     if is_dataclass(value):
         return tensor_to_data(asdict(value))
     if isinstance(value, dict):
@@ -28,39 +40,132 @@ def tensor_to_data(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [tensor_to_data(item) for item in value]
     if isinstance(value, float) and not math.isfinite(value):
-        return None
+        raise ValueError("Nonfinite values cannot be written as scientific JSON")
     return value
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    encoded = json.dumps(tensor_to_data(payload), indent=2, sort_keys=True, allow_nan=False) + "\n"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as stream:
-        json.dump(tensor_to_data(payload), stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        temporary = Path(stream.name)
-    os.replace(temporary, path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(encoded)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
-def write_samples_atomic(path: Path, samples: torch.Tensor) -> None:
+def tensor_sha256(samples: torch.Tensor) -> str:
+    """Hash shape, dtype, and tensor bytes without depending on NumPy."""
+
+    validate_samples(samples)
+    tensor = samples.detach().cpu().contiguous()
+    digest = hashlib.sha256(f"{tensor.dtype}:{list(tensor.shape)}:".encode())
+    for chunk in tensor.view(torch.uint8).flatten().split(1024 * 1024):
+        digest.update(bytes(chunk.tolist()))
+    return digest.hexdigest()
+
+
+def write_samples_atomic(
+    path: Path,
+    samples: torch.Tensor,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Atomically publish a sample envelope and return its written-file digest."""
+
+    validate_samples(samples)
+    payload = {
+        "schema_version": "2.1",
+        "samples": samples.detach().cpu(),
+        "samples_sha256": tensor_sha256(samples),
+        "metadata": tensor_to_data(metadata or {}),
+    }
+    payload["metadata_sha256"] = _metadata_sha256(payload["metadata"])
+    payload["envelope_sha256"] = _envelope_sha256(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as stream:
         temporary = Path(stream.name)
     try:
-        torch.save({"samples": samples.detach().cpu()}, temporary)
+        torch.save(payload, temporary)
+        written_digest = sha256(temporary)
         os.replace(temporary, path)
+        return written_digest
     finally:
         if temporary.exists():
             temporary.unlink()
 
 
 def read_samples(path: Path) -> torch.Tensor:
-    payload = torch.load(path, map_location="cpu", weights_only=True)
-    samples = payload["samples"]
-    if not isinstance(samples, torch.Tensor) or samples.ndim != 2:
-        raise ValueError("Invalid sample artifact")
+    samples, _ = read_sample_artifact(path)
     return samples
+
+
+def read_sample_artifact(
+    path: Path,
+    *,
+    expected_config_sha256: str | None = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    snapshot = read_sample_snapshot(path, expected_config_sha256=expected_config_sha256)
+    return snapshot.samples, snapshot.metadata
+
+
+def read_sample_snapshot(
+    path: Path,
+    *,
+    expected_config_sha256: str | None = None,
+) -> SampleSnapshot:
+    # Parse and hash the same immutable byte snapshot. Rereading a pathname
+    # after torch.load could otherwise label an older tensor with a newer run's
+    # file hash when another process atomically replaces the file.
+    content = path.read_bytes()
+    payload = torch.load(io.BytesIO(content), map_location="cpu", weights_only=True)
+    if not isinstance(payload, dict) or payload.get("schema_version") != "2.1":
+        raise ValueError(
+            "Unverified legacy sample artifact; regenerate it with the audited sampler"
+        )
+    samples = payload.get("samples")
+    validate_samples(samples)
+    if payload.get("samples_sha256") != tensor_sha256(samples):
+        raise ValueError("Sample content SHA-256 mismatch")
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid sample metadata")
+    if payload.get("metadata_sha256") != _metadata_sha256(metadata):
+        raise ValueError("Sample metadata SHA-256 mismatch")
+    if payload.get("envelope_sha256") != _envelope_sha256(payload):
+        raise ValueError("Sample envelope SHA-256 mismatch")
+    if expected_config_sha256 is not None:
+        if metadata.get("config_sha256") != expected_config_sha256:
+            raise ValueError("Sample/configuration SHA-256 mismatch")
+        if not isinstance(metadata.get("seed"), int) or isinstance(metadata["seed"], bool):
+            raise ValueError("Sample artifact is missing its effective seed")
+        if not metadata.get("run_id") or not metadata.get("source_sha256"):
+            raise ValueError("Sample artifact is missing run/source provenance")
+        if metadata.get("source_sha256") != source_sha256():
+            raise ValueError("Sample/source SHA-256 mismatch; regenerate with the current source")
+    return SampleSnapshot(samples, metadata, hashlib.sha256(content).hexdigest())
+
+
+def _envelope_sha256(payload: dict[str, Any]) -> str:
+    # The independent component digests alone would permit mixing a valid
+    # tensor/digest from run B with a valid metadata/digest from run A.
+    binding = {key: payload[key] for key in ("schema_version", "samples_sha256", "metadata_sha256")}
+    return hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _metadata_sha256(metadata: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        tensor_to_data(metadata), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def sha256(path: Path) -> str:
@@ -71,12 +176,25 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def provenance(config_path: Path, seed: int) -> dict[str, Any]:
+def source_sha256() -> str:
+    digest = hashlib.sha256()
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()
+
+
+def provenance(
+    config_path: Path,
+    seed: int,
+    *,
+    config_sha256: str | None = None,
+) -> dict[str, Any]:
     return {
         "config_path": str(config_path),
-        "config_sha256": sha256(config_path),
+        "config_sha256": config_sha256 or sha256(config_path),
+        "source_sha256": source_sha256(),
         "seed": int(seed),
         "python": sys.version.split()[0],
-        "pytorch": torch.__version__,
+        "pytorch": str(torch.__version__),
         "platform": platform.platform(),
     }
